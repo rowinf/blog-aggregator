@@ -1,0 +1,7 @@
+###
+# @name create_user
+POST http://localhost:8080/v1/users
+Content-Type: application/json
+{
+  "name": "Lane"
+}
