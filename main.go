@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -43,11 +44,12 @@ type UserParams struct {
 	CreatedAt string    `json:"created_at"`
 	UpdatedAt string    `json:"updated_at"`
 	Id        uuid.UUID `json:"id"`
+	ApiKey    string    `json:"apikey"`
 }
 
 func main() {
 	godotenv.Load()
-	db, err := sql.Open("postgres", os.Getenv("PG_CONNECTION_STRING"))
+	db, err := sql.Open("postgres", os.Getenv("GOOSE_DBSTRING"))
 	if err != nil {
 		panic("database error")
 	}
@@ -63,6 +65,28 @@ func main() {
 	})
 	r.HandleFunc("/v1/err", func(w http.ResponseWriter, _ *http.Request) {
 		internal.RespondWithError(w, http.StatusInternalServerError, "Internal Server Error")
+	})
+	r.HandleFunc("GET /v1/users", func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		parts := strings.Split(auth, " ")
+		key := ""
+		if len(parts) < 2 {
+			internal.RespondWithError(w, http.StatusBadRequest, "authorization required")
+		} else {
+			key = parts[1]
+			payload, err := config.DB.GetUserByApiKey(r.Context(), key)
+			if err != nil {
+				internal.RespondWithError(w, http.StatusNotFound, err.Error())
+			} else {
+				internal.RespondWithJSON(w, http.StatusOK, UserParams{
+					Id:        uuid.MustParse(payload.ID),
+					CreatedAt: payload.CreatedAt.String(),
+					UpdatedAt: payload.UpdatedAt.String(),
+					ApiKey:    payload.Apikey,
+					Name:      payload.Name,
+				})
+			}
+		}
 	})
 	r.HandleFunc("POST /v1/users", func(w http.ResponseWriter, r *http.Request) {
 		body := UserParams{}
@@ -86,6 +110,7 @@ func main() {
 					CreatedAt: user.CreatedAt.String(),
 					UpdatedAt: user.UpdatedAt.String(),
 					Name:      user.Name,
+					ApiKey:    user.Apikey,
 				})
 			}
 		}
