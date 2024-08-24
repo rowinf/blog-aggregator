@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,8 +15,26 @@ import (
 	"github.com/rowinf/blog-aggregator/internal/database"
 )
 
-type apiConfig struct {
+type authedHandler func(http.ResponseWriter, *http.Request, database.User)
+
+type ApiConfig struct {
 	DB *database.Queries
+}
+
+type UserParams struct {
+	Name      string    `json:"name"`
+	CreatedAt string    `json:"created_at"`
+	UpdatedAt string    `json:"updated_at"`
+	Id        uuid.UUID `json:"id"`
+	ApiKey    string    `json:"apikey"`
+}
+
+type FeedParams struct {
+	Name      string    `json:"name"`
+	CreatedAt string    `json:"created_at"`
+	UpdatedAt string    `json:"updated_at"`
+	Id        uuid.UUID `json:"id"`
+	Url       string    `json:"url"`
 }
 
 // addCorsHeaders is a middleware function that adds CORS headers to the response.
@@ -39,12 +56,53 @@ func addCorsHeaders(next http.Handler) http.Handler {
 	})
 }
 
-type UserParams struct {
-	Name      string    `json:"name"`
-	CreatedAt string    `json:"created_at"`
-	UpdatedAt string    `json:"updated_at"`
-	Id        uuid.UUID `json:"id"`
-	ApiKey    string    `json:"apikey"`
+func (cfg *ApiConfig) middlewareAuth(handler authedHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		apiKey, err := internal.GetHeaderApiKey(w, r)
+		if err != nil {
+			internal.RespondWithError(w, http.StatusBadRequest, "no api key")
+		} else {
+			user, uerr := cfg.DB.GetUserByApiKey(r.Context(), apiKey)
+			if uerr != nil {
+				internal.RespondWithError(w, http.StatusBadRequest, "invalid api key")
+			} else {
+				handler(w, r, user)
+			}
+		}
+	}
+}
+
+func (cfg *ApiConfig) handleUsersGet(w http.ResponseWriter, r *http.Request, user database.User) {
+	internal.RespondWithJSON(w, http.StatusOK, UserParams{
+		Id:        uuid.MustParse(user.ID),
+		CreatedAt: user.CreatedAt.String(),
+		UpdatedAt: user.UpdatedAt.String(),
+		ApiKey:    user.Apikey,
+		Name:      user.Name,
+	})
+}
+
+func (cfg *ApiConfig) handleFeedsPost(w http.ResponseWriter, r *http.Request, user database.User) {
+	body := FeedParams{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&body)
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+	} else {
+		feed, err := cfg.DB.CreateFeed(r.Context(), database.CreateFeedParams{
+			ID:        uuid.NewString(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Name:      body.Name,
+			Url:       body.Url,
+			UserID:    user.ID,
+		})
+		if err != nil {
+			internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		} else {
+			internal.RespondWithJSON(w, http.StatusCreated, feed)
+		}
+	}
 }
 
 func main() {
@@ -53,7 +111,7 @@ func main() {
 	if err != nil {
 		panic("database error")
 	}
-	config := apiConfig{
+	apiConfig := ApiConfig{
 		DB: database.New(db),
 	}
 	r := http.NewServeMux()
@@ -66,28 +124,7 @@ func main() {
 	r.HandleFunc("/v1/err", func(w http.ResponseWriter, _ *http.Request) {
 		internal.RespondWithError(w, http.StatusInternalServerError, "Internal Server Error")
 	})
-	r.HandleFunc("GET /v1/users", func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		parts := strings.Split(auth, " ")
-		key := ""
-		if len(parts) < 2 {
-			internal.RespondWithError(w, http.StatusBadRequest, "authorization required")
-		} else {
-			key = parts[1]
-			payload, err := config.DB.GetUserByApiKey(r.Context(), key)
-			if err != nil {
-				internal.RespondWithError(w, http.StatusNotFound, err.Error())
-			} else {
-				internal.RespondWithJSON(w, http.StatusOK, UserParams{
-					Id:        uuid.MustParse(payload.ID),
-					CreatedAt: payload.CreatedAt.String(),
-					UpdatedAt: payload.UpdatedAt.String(),
-					ApiKey:    payload.Apikey,
-					Name:      payload.Name,
-				})
-			}
-		}
-	})
+	r.HandleFunc("GET /v1/users", apiConfig.middlewareAuth(apiConfig.handleUsersGet))
 	r.HandleFunc("POST /v1/users", func(w http.ResponseWriter, r *http.Request) {
 		body := UserParams{}
 		decoder := json.NewDecoder(r.Body)
@@ -101,7 +138,7 @@ func main() {
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}
-			user, err := config.DB.CreateUser(r.Context(), payload)
+			user, err := apiConfig.DB.CreateUser(r.Context(), payload)
 			if err != nil {
 				internal.RespondWithError(w, http.StatusBadRequest, err.Error())
 			} else {
@@ -115,6 +152,8 @@ func main() {
 			}
 		}
 	})
+	r.HandleFunc("POST /v1/feeds", apiConfig.middlewareAuth(apiConfig.handleFeedsPost))
+
 	corsMux := addCorsHeaders(r)
 	// Create a new HTTP server with the corsMux as the handler
 	server := &http.Server{

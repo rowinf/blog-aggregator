@@ -15,3 +15,13 @@ Content-Type: application/json
 GET {{host}}/v1/users
 Content-Type: application/json
 Authorization: ApiKey {{$global.apikey}}
+
+###
+# @name create_feed
+POST {{host}}/v1/feeds
+Content-Type: application/json
+Authorization: ApiKey {{$global.apikey}}
+{
+  "name": "The Boot.dev Blog",
+  "url": "https://blog.boot.dev/index.xml"
+}
