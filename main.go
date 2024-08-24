@@ -105,6 +105,15 @@ func (cfg *ApiConfig) handleFeedsPost(w http.ResponseWriter, r *http.Request, us
 	}
 }
 
+func (cfg *ApiConfig) handleFeedsGet(w http.ResponseWriter, r *http.Request) {
+	feeds, err := cfg.DB.GetAllFeeds(r.Context())
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+	} else {
+		internal.RespondWithJSON(w, http.StatusOK, feeds)
+	}
+}
+
 func main() {
 	godotenv.Load()
 	db, err := sql.Open("postgres", os.Getenv("GOOSE_DBSTRING"))
@@ -153,6 +162,7 @@ func main() {
 		}
 	})
 	r.HandleFunc("POST /v1/feeds", apiConfig.middlewareAuth(apiConfig.handleFeedsPost))
+	r.HandleFunc("GET /v1/feeds", apiConfig.handleFeedsGet)
 
 	corsMux := addCorsHeaders(r)
 	// Create a new HTTP server with the corsMux as the handler

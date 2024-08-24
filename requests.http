@@ -25,3 +25,9 @@ Authorization: ApiKey {{$global.apikey}}
   "name": "The Boot.dev Blog",
   "url": "https://blog.boot.dev/index.xml"
 }
+
+
+###
+# @name get_feeds
+GET {{host}}/v1/feeds
+Content-Type: application/json
