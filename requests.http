@@ -25,9 +25,23 @@ Authorization: ApiKey {{$global.apikey}}
   "name": "The Boot.dev Blog",
   "url": "https://blog.boot.dev/index.xml"
 }
-
+{{
+  $global.created_feed_id=response.parsedBody.id
+}}
 
 ###
 # @name get_feeds
 GET {{host}}/v1/feeds
 Content-Type: application/json
+{{
+  $global.created_feed_id=response.parsedBody[0]?.id
+}}
+
+###
+# @name create_feed_follow
+POST {{host}}/v1/feed_follows
+Content-Type: application/json
+Authorization: ApiKey {{$global.apikey}}
+{
+  "feed_id": "{{$global.created_feed_id}}"
+}

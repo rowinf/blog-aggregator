@@ -30,11 +30,29 @@ type UserParams struct {
 }
 
 type FeedParams struct {
-	Name      string    `json:"name"`
-	CreatedAt string    `json:"created_at"`
-	UpdatedAt string    `json:"updated_at"`
-	Id        uuid.UUID `json:"id"`
-	Url       string    `json:"url"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	Id        string `json:"id"`
+	Url       string `json:"url"`
+	UserId    string `json:"user_id"`
+}
+
+type FeedFollowsParams struct {
+	Id        string `json:"id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	FeedId    string `json:"feed_id"`
+	UserId    string `json:"user_id"`
+}
+
+func (params *FeedParams) asJSON(feed database.Feed) {
+	params.Id = feed.ID
+	params.CreatedAt = feed.CreatedAt.Format(time.RFC3339)
+	params.UpdatedAt = feed.UpdatedAt.Format(time.RFC3339)
+	params.Name = feed.Name
+	params.Url = feed.Url
+	params.UserId = feed.UserID
 }
 
 // addCorsHeaders is a middleware function that adds CORS headers to the response.
@@ -99,13 +117,56 @@ func (cfg *ApiConfig) handleFeedsPost(w http.ResponseWriter, r *http.Request, us
 		})
 		if err != nil {
 			internal.RespondWithError(w, http.StatusBadRequest, err.Error())
-		} else {
-			internal.RespondWithJSON(w, http.StatusCreated, feed)
+			return
 		}
+		payload := FeedParams{}
+		payload.asJSON(feed)
+		internal.RespondWithJSON(w, http.StatusCreated, payload)
 	}
 }
 
 func (cfg *ApiConfig) handleFeedsGet(w http.ResponseWriter, r *http.Request) {
+	feeds, err := cfg.DB.GetAllFeeds(r.Context())
+	if err != nil {
+		internal.RespondWithError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	payload := make([]FeedParams, len(feeds))
+	for i := range payload {
+		payload[i].asJSON(feeds[i])
+	}
+	internal.RespondWithJSON(w, http.StatusOK, payload)
+}
+
+func (cfg *ApiConfig) handleFeedFollowsPost(w http.ResponseWriter, r *http.Request, user database.User) {
+	body := FeedFollowsParams{}
+	decoder := json.NewDecoder(r.Body)
+	err := decoder.Decode(&body)
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+	} else {
+		feed_follow, err := cfg.DB.CreateFeedFollow(r.Context(), database.CreateFeedFollowParams{
+			ID:        uuid.NewString(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			FeedID:    body.FeedId,
+			UserID:    user.ID,
+		})
+		if err != nil {
+			internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		} else {
+			internal.RespondWithJSON(w, http.StatusOK, FeedFollowsParams{
+				Id:        feed_follow.ID,
+				CreatedAt: feed_follow.CreatedAt.Format(time.RFC3339),
+				UpdatedAt: feed_follow.UpdatedAt.Format(time.RFC3339),
+				FeedId:    feed_follow.FeedID,
+				UserId:    user.ID,
+			})
+		}
+	}
+}
+
+func (cfg *ApiConfig) handleFeedFollowsGet(w http.ResponseWriter, r *http.Request) {
 	feeds, err := cfg.DB.GetAllFeeds(r.Context())
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
@@ -163,6 +224,8 @@ func main() {
 	})
 	r.HandleFunc("POST /v1/feeds", apiConfig.middlewareAuth(apiConfig.handleFeedsPost))
 	r.HandleFunc("GET /v1/feeds", apiConfig.handleFeedsGet)
+	r.HandleFunc("GET /v1/feed_follows", apiConfig.handleFeedFollowsGet)
+	r.HandleFunc("POST /v1/feed_follows", apiConfig.middlewareAuth(apiConfig.handleFeedFollowsPost))
 
 	corsMux := addCorsHeaders(r)
 	// Create a new HTTP server with the corsMux as the handler
