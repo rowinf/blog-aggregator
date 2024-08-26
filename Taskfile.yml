@@ -3,15 +3,11 @@ version: '3'
 dotenv: ['.env']
 
 tasks:
-  build:
+  start:
     watch: true
     sources:
       - '**/*.go'
     cmds:
       - go build
-  start:
-    sources:
-      - blog-aggregator
-    cmds:
       - ./blog-aggregator -h localhost -p 8080
 
