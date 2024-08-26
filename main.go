@@ -46,13 +46,23 @@ type FeedFollowsParams struct {
 	UserId    string `json:"user_id"`
 }
 
-func (params *FeedParams) asJSON(feed database.Feed) {
+func (params *FeedParams) asJSON(feed database.Feed) *FeedParams {
 	params.Id = feed.ID
 	params.CreatedAt = feed.CreatedAt.Format(time.RFC3339)
 	params.UpdatedAt = feed.UpdatedAt.Format(time.RFC3339)
 	params.Name = feed.Name
 	params.Url = feed.Url
 	params.UserId = feed.UserID
+	return params
+}
+
+func (params *FeedFollowsParams) asJSON(feedFollow database.FeedFollow) *FeedFollowsParams {
+	params.Id = feedFollow.ID
+	params.CreatedAt = feedFollow.CreatedAt.Format(time.RFC3339)
+	params.UpdatedAt = feedFollow.UpdatedAt.Format(time.RFC3339)
+	params.UserId = feedFollow.UserID
+	params.FeedId = feedFollow.FeedID
+	return params
 }
 
 // addCorsHeaders is a middleware function that adds CORS headers to the response.
@@ -120,8 +130,7 @@ func (cfg *ApiConfig) handleFeedsPost(w http.ResponseWriter, r *http.Request, us
 			return
 		}
 		payload := FeedParams{}
-		payload.asJSON(feed)
-		internal.RespondWithJSON(w, http.StatusCreated, payload)
+		internal.RespondWithJSON(w, http.StatusCreated, payload.asJSON(feed))
 	}
 }
 
@@ -145,7 +154,7 @@ func (cfg *ApiConfig) handleFeedFollowsPost(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
 	} else {
-		feed_follow, err := cfg.DB.CreateFeedFollow(r.Context(), database.CreateFeedFollowParams{
+		feedFollow, err := cfg.DB.CreateFeedFollow(r.Context(), database.CreateFeedFollowParams{
 			ID:        uuid.NewString(),
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
@@ -154,25 +163,35 @@ func (cfg *ApiConfig) handleFeedFollowsPost(w http.ResponseWriter, r *http.Reque
 		})
 		if err != nil {
 			internal.RespondWithError(w, http.StatusBadRequest, err.Error())
-		} else {
-			internal.RespondWithJSON(w, http.StatusOK, FeedFollowsParams{
-				Id:        feed_follow.ID,
-				CreatedAt: feed_follow.CreatedAt.Format(time.RFC3339),
-				UpdatedAt: feed_follow.UpdatedAt.Format(time.RFC3339),
-				FeedId:    feed_follow.FeedID,
-				UserId:    user.ID,
-			})
+			return
 		}
+		paylod := FeedFollowsParams{}
+		internal.RespondWithJSON(w, http.StatusOK, paylod.asJSON(feedFollow))
 	}
 }
 
-func (cfg *ApiConfig) handleFeedFollowsGet(w http.ResponseWriter, r *http.Request) {
-	feeds, err := cfg.DB.GetAllFeeds(r.Context())
+func (cfg *ApiConfig) handleFeedFollowsDelete(w http.ResponseWriter, r *http.Request, user database.User) {
+	feedFollowID := r.PathValue("feedFollowID")
+	feedFollow, err := cfg.DB.DeleteFeedFollow(r.Context(), feedFollowID)
+	if err != nil {
+		internal.RespondWithError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	payload := FeedFollowsParams{}
+	internal.RespondWithJSON(w, http.StatusNoContent, payload.asJSON(feedFollow))
+}
+
+func (cfg *ApiConfig) handleFeedFollowsGet(w http.ResponseWriter, r *http.Request, user database.User) {
+	feeds, err := cfg.DB.GetFeedFollowsByUserId(r.Context(), user.ID)
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
-	} else {
-		internal.RespondWithJSON(w, http.StatusOK, feeds)
+		return
 	}
+	payload := make([]FeedFollowsParams, len(feeds))
+	for index, feed := range feeds {
+		payload[index].asJSON(feed)
+	}
+	internal.RespondWithJSON(w, http.StatusOK, payload)
 }
 
 func main() {
@@ -224,8 +243,9 @@ func main() {
 	})
 	r.HandleFunc("POST /v1/feeds", apiConfig.middlewareAuth(apiConfig.handleFeedsPost))
 	r.HandleFunc("GET /v1/feeds", apiConfig.handleFeedsGet)
-	r.HandleFunc("GET /v1/feed_follows", apiConfig.handleFeedFollowsGet)
+	r.HandleFunc("GET /v1/feed_follows", apiConfig.middlewareAuth(apiConfig.handleFeedFollowsGet))
 	r.HandleFunc("POST /v1/feed_follows", apiConfig.middlewareAuth(apiConfig.handleFeedFollowsPost))
+	r.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", apiConfig.middlewareAuth(apiConfig.handleFeedFollowsDelete))
 
 	corsMux := addCorsHeaders(r)
 	// Create a new HTTP server with the corsMux as the handler

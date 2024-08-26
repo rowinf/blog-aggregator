@@ -23,3 +23,4 @@ go.work.sum
 blog-aggregator
 
 .env
+.task

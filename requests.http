@@ -45,3 +45,18 @@ Authorization: ApiKey {{$global.apikey}}
 {
   "feed_id": "{{$global.created_feed_id}}"
 }
+{{
+  $global.created_feed_follow_id=response.parsedBody.id
+}}
+
+###
+# @name delete_feed_follow
+DELETE {{host}}/v1/feed_follows/{{$global.created_feed_follow_id}}
+Content-Type: application/json
+Authorization: ApiKey {{$global.apikey}}
+
+###
+# @name get_feed_follows
+GET {{host}}/v1/feed_follows
+Content-Type: application/json
+Authorization: ApiKey {{$global.apikey}}
