@@ -46,6 +46,19 @@ type FeedFollowsParams struct {
 	UserId    string `json:"user_id"`
 }
 
+type FeedCreationParams struct {
+	Feed       *FeedParams        `json:"feed"`
+	FeedFollow *FeedFollowsParams `json:"feed_follow"`
+}
+
+func (params *FeedCreationParams) asJSON(feed database.Feed, feedFollow database.FeedFollow) *FeedCreationParams {
+	feedParams := FeedParams{}
+	feedFollowParams := FeedFollowsParams{}
+	params.Feed = feedParams.asJSON(feed)
+	params.FeedFollow = feedFollowParams.asJSON(feedFollow)
+	return params
+}
+
 func (params *FeedParams) asJSON(feed database.Feed) *FeedParams {
 	params.Id = feed.ID
 	params.CreatedAt = feed.CreatedAt.Format(time.RFC3339)
@@ -116,22 +129,33 @@ func (cfg *ApiConfig) handleFeedsPost(w http.ResponseWriter, r *http.Request, us
 	err := decoder.Decode(&body)
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
-	} else {
-		feed, err := cfg.DB.CreateFeed(r.Context(), database.CreateFeedParams{
-			ID:        uuid.NewString(),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-			Name:      body.Name,
-			Url:       body.Url,
-			UserID:    user.ID,
-		})
-		if err != nil {
-			internal.RespondWithError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		payload := FeedParams{}
-		internal.RespondWithJSON(w, http.StatusCreated, payload.asJSON(feed))
+		return
 	}
+	feed, err := cfg.DB.CreateFeed(r.Context(), database.CreateFeedParams{
+		ID:        uuid.NewString(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      body.Name,
+		Url:       body.Url,
+		UserID:    user.ID,
+	})
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	feedFollow, err := cfg.DB.CreateFeedFollow(r.Context(), database.CreateFeedFollowParams{
+		ID:        uuid.NewString(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		FeedID:    feed.ID,
+		UserID:    feed.UserID,
+	})
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	payload := FeedCreationParams{}
+	internal.RespondWithJSON(w, http.StatusCreated, payload.asJSON(feed, feedFollow))
 }
 
 func (cfg *ApiConfig) handleFeedsGet(w http.ResponseWriter, r *http.Request) {
