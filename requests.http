@@ -30,11 +30,25 @@ Authorization: ApiKey {{$global.apikey}}
 }}
 
 ###
+# @name create_feed_spring
+POST {{host}}/v1/feeds
+Content-Type: application/json
+Authorization: ApiKey {{$global.apikey}}
+{
+  "name": "Java Spring new and events",
+  "url": "https://spring.io/blog/category/news.atom"
+}
+{{
+  $global.created_feed_id=response.parsedBody.feed.id
+}}
+
+
+###
 # @name get_feeds
 GET {{host}}/v1/feeds
 Content-Type: application/json
 {{
-  $global.created_feed_id=response.parsedBody[0]?.id
+  $global.created_feed_id=response.parsedBody[0].id
 }}
 
 ###
@@ -58,5 +72,10 @@ Authorization: ApiKey {{$global.apikey}}
 ###
 # @name get_feed_follows
 GET {{host}}/v1/feed_follows
+Content-Type: application/json
+Authorization: ApiKey {{$global.apikey}}
+###
+# @name get_posts_by_user
+GET {{host}}/v1/posts
 Content-Type: application/json
 Authorization: ApiKey {{$global.apikey}}

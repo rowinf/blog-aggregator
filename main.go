@@ -56,6 +56,18 @@ type FeedCreationParams struct {
 	FeedFollow *FeedFollowsParams `json:"feed_follow"`
 }
 
+type PostParams struct {
+	Id          string `json:"id"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	FeedId      string `json:"feed_id"`
+	UserId      string `json:"user_id"`
+	PublishedAt string `json:"published_at"`
+	Url         string `json:"url"`
+	Description string `json:"description"`
+	Title       string `json:"title"`
+}
+
 type RSS struct {
 	XMLName xml.Name `xml:"rss"`
 	Channel Channel  `xml:"channel"`
@@ -110,6 +122,18 @@ func (params *FeedFollowsParams) asJSON(feedFollow database.FeedFollow) *FeedFol
 	params.UpdatedAt = feedFollow.UpdatedAt.Format(time.RFC3339)
 	params.UserId = feedFollow.UserID
 	params.FeedId = feedFollow.FeedID
+	return params
+}
+
+func (params *PostParams) asJSON(post database.GetPostsByUserRow) *PostParams {
+	params.Id = post.ID
+	params.CreatedAt = post.CreatedAt.Format(time.RFC3339)
+	params.UpdatedAt = post.UpdatedAt.Format(time.RFC3339)
+	params.FeedId = post.FeedID
+	params.Url = post.Url
+	params.Description = post.Description
+	params.Title = post.Title
+	params.PublishedAt = post.PublishedAt.Format(time.RFC3339)
 	return params
 }
 
@@ -253,6 +277,23 @@ func (cfg *ApiConfig) handleFeedFollowsGet(w http.ResponseWriter, r *http.Reques
 	internal.RespondWithJSON(w, http.StatusOK, payload)
 }
 
+func (cfg *ApiConfig) handlePostsByUserGet(w http.ResponseWriter, r *http.Request, user database.User) {
+	posts, err := cfg.DB.GetPostsByUser(r.Context(), database.GetPostsByUserParams{
+		Limit:  10,
+		UserID: user.ID,
+	})
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	payload := make([]PostParams, len(posts))
+	for index, post := range posts {
+		payload[index].asJSON(post)
+	}
+	internal.RespondWithJSON(w, http.StatusOK, payload)
+}
+
 func FetchRSSFeed(url string) RSS {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -272,12 +313,23 @@ func FetchRSSFeed(url string) RSS {
 	return rss
 }
 
+func ParseDate(dateStr string) (time.Time, error) {
+	const layout = "Mon, 02 Jan 2006 15:04:05 -0700"
+
+	parsedTime, err := time.Parse(layout, dateStr)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return parsedTime, nil
+}
+
 func (cfg *ApiConfig) processFeeds() {
 	var wg sync.WaitGroup
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		feeds, err := cfg.DB.GetNextFeedsToFetch(context.Background())
+		feeds, err := cfg.DB.GetNextFeedsToFetch(context.Background(), 10)
 		if err != nil {
 			log.Printf("failed to process feeds %v", err)
 			continue
@@ -289,6 +341,22 @@ func (cfg *ApiConfig) processFeeds() {
 				rss := FetchRSSFeed(feed.Url)
 				fmt.Printf("%s\n", rss.Channel.Title)
 				cfg.DB.MarkFeedFetched(context.Background(), feed.ID)
+				for _, item := range rss.Channel.Items {
+					publishedDate, err := ParseDate(item.PubDate)
+					if err != nil {
+						cfg.DB.CreatePost(context.Background(), database.CreatePostParams{
+							ID:          uuid.NewString(),
+							CreatedAt:   time.Now(),
+							UpdatedAt:   time.Now(),
+							Title:       item.Title,
+							Url:         item.Link,
+							Description: item.Description,
+							PublishedAt: publishedDate,
+							FeedID:      feed.ID,
+						})
+					}
+				}
+
 			}(feed)
 		}
 		wg.Wait()
@@ -348,6 +416,7 @@ func main() {
 	r.HandleFunc("GET /v1/feed_follows", apiConfig.middlewareAuth(apiConfig.handleFeedFollowsGet))
 	r.HandleFunc("POST /v1/feed_follows", apiConfig.middlewareAuth(apiConfig.handleFeedFollowsPost))
 	r.HandleFunc("DELETE /v1/feed_follows/{feedFollowID}", apiConfig.middlewareAuth(apiConfig.handleFeedFollowsDelete))
+	r.HandleFunc("GET /v1/posts", apiConfig.middlewareAuth(apiConfig.handlePostsByUserGet))
 
 	corsMux := addCorsHeaders(r)
 	// Create a new HTTP server with the corsMux as the handler

@@ -13,7 +13,7 @@ SELECT * FROM feeds;
 -- name: GetNextFeedsToFetch :many
 SELECT * FROM feeds
 ORDER BY last_fetched_at NULLS FIRST
-LIMIT 10;
+LIMIT $1;
 
 -- name: MarkFeedFetched :one
 UPDATE feeds SET last_fetched_at=datetime(), updated_at=datetime()
