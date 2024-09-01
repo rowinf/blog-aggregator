@@ -9,3 +9,13 @@ WHERE user_id = $1;
 
 -- name: GetAllFeeds :many
 SELECT * FROM feeds;
+
+-- name: GetNextFeedsToFetch :many
+SELECT * FROM feeds
+ORDER BY last_fetched_at NULLS FIRST
+LIMIT 10;
+
+-- name: MarkFeedFetched :one
+UPDATE feeds SET last_fetched_at=datetime(), updated_at=datetime()
+WHERE id=$1
+RETURNING *;

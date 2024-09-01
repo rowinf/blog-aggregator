@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/xml"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,6 +54,36 @@ type FeedFollowsParams struct {
 type FeedCreationParams struct {
 	Feed       *FeedParams        `json:"feed"`
 	FeedFollow *FeedFollowsParams `json:"feed_follow"`
+}
+
+type RSS struct {
+	XMLName xml.Name `xml:"rss"`
+	Channel Channel  `xml:"channel"`
+}
+
+type Channel struct {
+	Title         string   `xml:"title"`
+	Link          string   `xml:"link"`
+	Description   string   `xml:"description"`
+	Generator     string   `xml:"generator"`
+	Language      string   `xml:"language"`
+	LastBuildDate string   `xml:"lastBuildDate"`
+	AtomLink      AtomLink `xml:"atom:link"`
+	Items         []Item   `xml:"item"`
+}
+
+type AtomLink struct {
+	Href string `xml:"href,attr"`
+	Rel  string `xml:"rel,attr"`
+	Type string `xml:"type,attr"`
+}
+
+type Item struct {
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	PubDate     string `xml:"pubDate"`
+	GUID        string `xml:"guid"`
+	Description string `xml:"description"`
 }
 
 func (params *FeedCreationParams) asJSON(feed database.Feed, feedFollow database.FeedFollow) *FeedCreationParams {
@@ -218,6 +253,48 @@ func (cfg *ApiConfig) handleFeedFollowsGet(w http.ResponseWriter, r *http.Reques
 	internal.RespondWithJSON(w, http.StatusOK, payload)
 }
 
+func FetchRSSFeed(url string) RSS {
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Fatalf("couldnt fetch: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Failed to open rsponse body %v", err)
+	}
+
+	var rss RSS
+	err = xml.Unmarshal(body, &rss)
+	if err != nil {
+		log.Fatalf("Faile to unmarshal XML: %v", err)
+	}
+	return rss
+}
+
+func (cfg *ApiConfig) processFeeds() {
+	var wg sync.WaitGroup
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		feeds, err := cfg.DB.GetNextFeedsToFetch(context.Background())
+		if err != nil {
+			log.Printf("failed to process feeds %v", err)
+			continue
+		}
+		for _, feed := range feeds {
+			wg.Add(1)
+			go func(feed database.Feed) {
+				defer wg.Done()
+				rss := FetchRSSFeed(feed.Url)
+				fmt.Printf("%s\n", rss.Channel.Title)
+				cfg.DB.MarkFeedFetched(context.Background(), feed.ID)
+			}(feed)
+		}
+		wg.Wait()
+	}
+}
+
 func main() {
 	godotenv.Load()
 	db, err := sql.Open("postgres", os.Getenv("GOOSE_DBSTRING"))
@@ -227,6 +304,7 @@ func main() {
 	apiConfig := ApiConfig{
 		DB: database.New(db),
 	}
+	go apiConfig.processFeeds()
 	r := http.NewServeMux()
 	port := os.Getenv("PORT")
 	r.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {

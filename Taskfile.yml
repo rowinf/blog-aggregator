@@ -10,4 +10,11 @@ tasks:
     cmds:
       - go build
       - ./blog-aggregator -h localhost -p 8080
+  
+  migrate:
+    cmds:
+      - goose up
 
+  sqlc:
+    cmds:
+      - sqlc generate
