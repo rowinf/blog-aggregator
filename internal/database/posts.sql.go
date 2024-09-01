@@ -7,7 +7,6 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
@@ -54,9 +53,9 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 }
 
 const getPostsByUser = `-- name: GetPostsByUser :many
-SELECT posts.id, posts.created_at, posts.updated_at, title, posts.url, description, published_at, feed_id, f.id, f.created_at, f.updated_at, name, f.url, user_id, last_fetched_at FROM posts
-JOIN feeds as f ON feed_id = f.id
-WHERE f.user_id = $1
+SELECT p.id, p.created_at, p.updated_at, title, url, description, published_at, p.feed_id, ff.id, ff.created_at, ff.updated_at, user_id, ff.feed_id FROM posts as p 
+JOIN feed_follows as ff ON p.feed_id = ff.feed_id 
+WHERE ff.user_id=$1
 ORDER BY published_at DESC
 LIMIT $2
 `
@@ -67,21 +66,19 @@ type GetPostsByUserParams struct {
 }
 
 type GetPostsByUserRow struct {
-	ID            string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Title         string
-	Url           string
-	Description   string
-	PublishedAt   time.Time
-	FeedID        string
-	ID_2          string
-	CreatedAt_2   time.Time
-	UpdatedAt_2   time.Time
-	Name          string
-	Url_2         string
-	UserID        string
-	LastFetchedAt sql.NullTime
+	ID          string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Title       string
+	Url         string
+	Description string
+	PublishedAt time.Time
+	FeedID      string
+	ID_2        string
+	CreatedAt_2 time.Time
+	UpdatedAt_2 time.Time
+	UserID      string
+	FeedID_2    string
 }
 
 func (q *Queries) GetPostsByUser(ctx context.Context, arg GetPostsByUserParams) ([]GetPostsByUserRow, error) {
@@ -105,10 +102,8 @@ func (q *Queries) GetPostsByUser(ctx context.Context, arg GetPostsByUserParams) 
 			&i.ID_2,
 			&i.CreatedAt_2,
 			&i.UpdatedAt_2,
-			&i.Name,
-			&i.Url_2,
 			&i.UserID,
-			&i.LastFetchedAt,
+			&i.FeedID_2,
 		); err != nil {
 			return nil, err
 		}

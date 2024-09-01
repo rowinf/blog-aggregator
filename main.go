@@ -61,7 +61,6 @@ type PostParams struct {
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 	FeedId      string `json:"feed_id"`
-	UserId      string `json:"user_id"`
 	PublishedAt string `json:"published_at"`
 	Url         string `json:"url"`
 	Description string `json:"description"`
@@ -279,7 +278,7 @@ func (cfg *ApiConfig) handleFeedFollowsGet(w http.ResponseWriter, r *http.Reques
 
 func (cfg *ApiConfig) handlePostsByUserGet(w http.ResponseWriter, r *http.Request, user database.User) {
 	posts, err := cfg.DB.GetPostsByUser(r.Context(), database.GetPostsByUserParams{
-		Limit:  10,
+		Limit:  100,
 		UserID: user.ID,
 	})
 	if err != nil {
@@ -314,14 +313,14 @@ func FetchRSSFeed(url string) RSS {
 }
 
 func ParseDate(dateStr string) (time.Time, error) {
-	const layout = "Mon, 02 Jan 2006 15:04:05 -0700"
-
-	parsedTime, err := time.Parse(layout, dateStr)
-	if err != nil {
-		return time.Time{}, err
+	layouts := []string{"Mon, 02 Jan 2006 15:04:05 MST", "Mon, 02 Jan 2006 15:04:05 -0700"}
+	for _, layout := range layouts {
+		parsedTime, err := time.Parse(layout, dateStr)
+		if err == nil {
+			return parsedTime, err
+		}
 	}
-
-	return parsedTime, nil
+	return time.Time{}, nil
 }
 
 func (cfg *ApiConfig) processFeeds() {
@@ -344,7 +343,9 @@ func (cfg *ApiConfig) processFeeds() {
 				for _, item := range rss.Channel.Items {
 					publishedDate, err := ParseDate(item.PubDate)
 					if err != nil {
-						cfg.DB.CreatePost(context.Background(), database.CreatePostParams{
+						fmt.Printf("date error: %v", err.Error())
+					} else {
+						_, err := cfg.DB.CreatePost(context.Background(), database.CreatePostParams{
 							ID:          uuid.NewString(),
 							CreatedAt:   time.Now(),
 							UpdatedAt:   time.Now(),
@@ -354,9 +355,11 @@ func (cfg *ApiConfig) processFeeds() {
 							PublishedAt: publishedDate,
 							FeedID:      feed.ID,
 						})
+						if err != nil {
+							fmt.Printf("couldnt create post: %v : %v", item, err.Error())
+						}
 					}
 				}
-
 			}(feed)
 		}
 		wg.Wait()
